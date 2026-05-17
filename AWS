@@ -1,0 +1,130 @@
+package com.bnpparibas.documentreporting.service;
+
+import com.bnpparibas.documentreporting.model.Document;
+import com.bnpparibas.documentreporting.model.DocumentStatus;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
+import org.mockito.InjectMocks;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.mock.web.MockMultipartFile;
+import org.springframework.test.util.ReflectionTestUtils;
+import software.amazon.awssdk.core.sync.RequestBody;
+import software.amazon.awssdk.services.s3.S3Client;
+import software.amazon.awssdk.services.s3.model.PutObjectRequest;
+import software.amazon.awssdk.services.s3.model.PutObjectResponse;
+
+import java.io.IOException;
+import java.security.NoSuchAlgorithmException;
+
+import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.*;
+
+@ExtendWith(MockitoExtension.class)
+class AwsS3BucketServiceImplTest {
+
+    @Mock
+    private S3Client s3Client;
+
+    @InjectMocks
+    private AwsS3BucketServiceImpl awsS3BucketService;
+
+    private MockMultipartFile mockFile;
+    private final String bucketName = "test-bucket";
+
+    @BeforeEach
+    void setUp() {
+        // Injecting @Value fields using ReflectionTestUtils since we are not loading the full Spring Context
+        ReflectionTestUtils.setField(awsS3BucketService, "s3Path", "some/path");
+        ReflectionTestUtils.setField(awsS3BucketService, "deleteStartDay", "Monday");
+        ReflectionTestUtils.setField(awsS3BucketService, "deleteStartTime", "00:00");
+        ReflectionTestUtils.setField(awsS3BucketService, "deleteEndDay", "Friday");
+        ReflectionTestUtils.setField(awsS3BucketService, "deleteEndTime", "23:59");
+
+        // Preparing a dummy multipart file
+        mockFile = new MockMultipartFile(
+                "file",
+                "testfile.txt",
+                "text/plain",
+                "Hello World From S3 Test Content".getBytes()
+        );
+    }
+
+    @Test
+    @DisplayName("Should successfully upload file to S3 and return mapped Document object")
+    void putObjectIntoBucket_Success() throws NoSuchAlgorithmException, IOException {
+        // Arrange
+        String key = "folder/testfile.txt"; // length > 7 so substring(7) works safely
+        PutObjectResponse mockResponse = PutObjectResponse.builder().build();
+        
+        when(s3Client.putObject(any(PutObjectRequest.class), any(RequestBody.class)))
+                .thenReturn(mockResponse);
+
+        // Act
+        Document result = awsS3BucketService.putObjectIntoBucket(bucketName, key, mockFile);
+
+        // Assert
+        assertNotNull(result);
+        assertEquals(DocumentStatus.SAVED, result.getDocumentStatus());
+        assertEquals("testfile.txt", result.getDocumentName()); // key.substring(7) -> "testfile.txt"
+        assertArrayEquals(mockFile.getBytes(), result.getContent());
+        assertNotNull(result.getCreationDateTime());
+
+        // Verifying S3 interactions and capturing arguments to validate checksums
+        ArgumentCaptor<PutObjectRequest> requestCaptor = ArgumentCaptor.forClass(PutObjectRequest.class);
+        verify(s3Client, times(1)).putObject(requestCaptor.capture(), any(RequestBody.class));
+        
+        PutObjectRequest capturedRequest = requestCaptor.getValue();
+        assertEquals(bucketName, capturedRequest.bucket());
+        assertEquals(key, capturedRequest.key());
+        assertNotNull(capturedRequest.checksumSHA256());
+    }
+
+    @Test
+    @DisplayName("Should replace whitespaces/tabs/newlines in key with underscores and default to 'null' if key is null")
+    void putObjectIntoBucket_WithSpecialCharactersAndNullKey() throws NoSuchAlgorithmException, IOException {
+        // Arrange
+        String messyKey = "prefix/\n\r\tfilename.txt";
+        PutObjectResponse mockResponse = PutObjectResponse.builder().build();
+        
+        when(s3Client.putObject(any(PutObjectRequest.class), any(RequestBody.class)))
+                .thenReturn(mockResponse);
+
+        // Act & Assert for messy key replacement
+        Document resultMessy = awsS3BucketService.putObjectIntoBucket(bucketName, messyKey, mockFile);
+        assertEquals("___filename.txt", resultMessy.getDocumentName()); // "prefix/___filename.txt".substring(7)
+
+        // Reset mock for the next isolated interaction within the test
+        clearInvocations(s3Client);
+
+        // Act & Assert for null key logic
+        // If key is null, your code changes it to "null", then key.substring(7) will throw StringIndexOutOfBoundsException
+        // because "null" has a length of 4. Testing this guarantees coverage of the null check branch.
+        assertThrows(StringIndexOutOfBoundsException.class, () -> {
+            awsS3BucketService.putObjectIntoBucket(bucketName, null, mockFile);
+        });
+    }
+
+    @Test
+    @DisplayName("Should propagate IOException when file stream reading fails")
+    void putObjectIntoBucket_ThrowsIOException() throws IOException {
+        // Arrange
+        String key = "folder/testfile.txt";
+        MultipartFile failingFile = mock(MultipartFile.class);
+        
+        // Simulating an exception when getBytes() or getInputStream() is triggered
+        when(failingFile.getBytes()).thenThrow(new IOException("Stream closed"));
+
+        // Act & Assert
+        assertThrows(IOException.class, () -> {
+            awsS3BucketService.putObjectIntoBucket(bucketName, key, failingFile);
+        });
+
+        // Verify no upload attempted if processing failed early
+        verify(s3Client, never()).putObject(any(PutObjectRequest.class), any(RequestBody.class));
+    }
+}
