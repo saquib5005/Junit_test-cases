@@ -1,0 +1,81 @@
+private static void buildField59ForMT700(ElTnxRecord elTnxRecord, Mt700 mt700, String swiftReleaseYear) {
+    // 1. Main method is now simple and flat. Complexity score: 1
+    // Yoda condition used to prevent NPE if swiftReleaseYear is null
+    if (SR2026.equals(swiftReleaseYear)) {
+        mt700.setField59(buildBeneficiaryForSR2026(elTnxRecord));
+    } else {
+        mt700.setField59(buildLegacyBeneficiary(elTnxRecord));
+    }
+}
+
+// 2. Extracted SR2026 logic. Flat 'if' statements. Complexity score: 4
+private static BeneficiaryType buildBeneficiaryForSR2026(ElTnxRecord elTnxRecord) {
+    BeneficiaryType benefType = new BeneficiaryType();
+    ZCharacterSymbol354Type field59N = new ZCharacterSymbol354Type();
+    
+    if (StringUtils.isNotEmpty(elTnxRecord.getBeneficiaryAbbvName())) { 
+        field59N.getLine().add(elTnxRecord.getBeneficiaryAbbvName()); 
+        benefType.setField59N(field59N);
+    }
+
+    ZCharacterSymbol354Type field59S = new ZCharacterSymbol354Type();
+    if (StringUtils.isNotEmpty(elTnxRecord.getBeneficiaryAddressLinel())) { 
+        field59S.getLine().add(elTnxRecord.getBeneficiaryAddressLinel());
+    }
+    if (StringUtils.isNotEmpty(elTnxRecord.getBeneficiaryAddressLine2())) { 
+        field59S.getLine().add(elTnxRecord.getBeneficiaryAddressLine2());
+    }
+    if (StringUtils.isNotEmpty(elTnxRecord.getBeneficiaryDom())) { 
+        field59S.getLine().add(elTnxRecord.getBeneficiaryDom());
+    }
+    benefType.setField59S(field59S);
+
+    // Extracted nested 'if' logic to keep complexity low
+    buildAddressForSR2026(elTnxRecord.getBeneficiaryAddress(), benefType);
+
+    return benefType;
+}
+
+// 3. Extracted nested Address logic. Complexity score: 4
+private static void buildAddressForSR2026(AddressType addressType, BeneficiaryType benefType) {
+    // Guard clause prevents nesting
+    if (addressType == null) {
+        return;
+    }
+
+    BenefAddressType addr = new BenefAddressType();
+    
+    if (StringUtils.isNotEmpty(addressType.getTownName())) { 
+        addr.setField59T(addressType.getTownName());
+    }
+    if (StringUtils.isNotEmpty(addressType.getPostCode())) { 
+        addr.setField59P(addressType.getPostCode());
+    }
+    if (StringUtils.isNotEmpty(addressType.getCountry())) {
+        addr.setField59R(addressType.getCountry());
+    }
+    
+    benefType.setBeneficiaryAddress(addr);
+}
+
+// 4. Extracted Legacy logic. Flat 'if' statements. Complexity score: 4
+private static BeneficiaryType buildLegacyBeneficiary(ElTnxRecord elTnxRecord) {
+    BeneficiaryType ab = new BeneficiaryType(); 
+    CharacterSymbol354Type field59 = new CharacterSymbol354Type();
+
+    if (StringUtils.isNotEmpty(elTnxRecord.getBeneficiaryAbbvName())) {
+        field59.getLine().add(elTnxRecord.getBeneficiaryAbbvName());
+    }
+    if (StringUtils.isNotEmpty(elTnxRecord.getBeneficiaryAddressLinel())) {
+        field59.getLine().add(elTnxRecord.getBeneficiaryAddressLinel());
+    }
+    if (StringUtils.isNotEmpty(elTnxRecord.getBeneficiaryAddressLine2())) {
+        field59.getLine().add(elTnxRecord.getBeneficiaryAddressLine2());
+    }
+    if (StringUtils.isNotEmpty(elTnxRecord.getBeneficiaryDom())) {
+        field59.getLine().add(elTnxRecord.getBeneficiaryDom());
+    }
+
+    ab.setField59(field59);
+    return ab;
+}
