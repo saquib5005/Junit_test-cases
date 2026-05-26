@@ -1,0 +1,341 @@
+package com.bnpparibas.tch.dp.service.impl;
+
+import com.bnpparibas.tch.digital.client.referential.model.RoutingSetup;
+import com.bnpparibas.tch.do.dto.RoutingSetupCriteriaDto;
+import com.bnpparibas.tch.dp.entity.*;
+import com.bnpparibas.tch.dp.enums.*;
+import com.bnpparibas.tch.dp.exception.BadRequestException;
+import com.bnpparibas.tch.dp.exception.MappingException;
+import com.bopparibas.tch.dp.exception.TchBusinessException;
+import com.bopparibas.tch.dp.handler.ErrorLogHandler;
+import com.bnpparibas.tch.dp.jms.sender.FileActSender;
+import com.bnpparibas.tch.dp.jms.sender.SwiftFlowSender;
+import com.bnpparibas.tch.dp.service.*;
+import com.bnpparibas.tch.dp.util.ZipUtils;
+import com.bnpparibas.tch.dp.util.XmlUtils;
+import generated.ElTnxRecord;
+import jakarta.persistence.EntityNotFoundException;
+import org.apache.commons.codec.digest.DigestUtils;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.InjectMocks;
+import org.mockito.Mock;
+import org.mockito.MockedStatic;
+import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.test.util.ReflectionTestUtils;
+import org.springframework.web.multipart.MultipartFile;
+
+import java.io.ByteArrayInputStream;
+import java.io.InputStream;
+import java.util.Collections;
+import java.util.List;
+
+import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.*;
+
+@ExtendWith(MockitoExtension.class)
+public class DpProcessingServiceImplTest {
+
+    @InjectMocks
+    private DpProcessingServiceImpl dpProcessingService;
+
+    @Mock private RoutingSetupService routingSetupService;
+    @Mock private SwiftService swiftService;
+    @Mock private SwiftFlowSender swiftFlowSender;
+    @Mock private FileActFlowService fileActFlowService;
+    @Mock private TransactionService transactionService;
+    @Mock private FileActSender fileActSender;
+    @Mock private DocumentReportService documentReportService;
+    @Mock private SwiftMsgTypeService swiftMsgTypeService;
+    @Mock private DpXmlRequestService requestService;
+    @Mock private SwiftNetService swiftNetService;
+    @Mock private ErrorCodeSetupService errorCodeSetupService;
+    @Mock private ErrorMessageService errorMessageService;
+    @Mock private ErrorLogHandler errorLogHandler;
+    @Mock private SwiftServiceImpl swiftServiceImpl;
+
+    @Mock private MultipartFile mockFile;
+    @Mock private MultipartFile mockXmlFile;
+    @Mock private DpErrorCodeSetup mockErrorCodeSetup;
+
+    @BeforeEach
+    void setUp() {
+        ReflectionTestUtils.setField(dpProcessingService, "s3Path", "/test/s3/path/");
+        ReflectionTestUtils.setField(dpProcessingService, "swiftUseTestBic", "false");
+    }
+
+    // ========================================================================
+    // Tests for: createSwiftletFlowsFromXml
+    // ========================================================================
+
+    @Test
+    void testCreateSwiftletFlowsFromXml_EmptyFile_ThrowsBadRequestException() {
+        when(mockFile.isEmpty()).thenReturn(true);
+        when(errorCodeSetupService.findByErrorCode(anyString())).thenReturn(mockErrorCodeSetup);
+        when(mockErrorCodeSetup.getDescription()).thenReturn("Empty File");
+
+        BadRequestException exception = assertThrows(BadRequestException.class, 
+            () -> dpProcessingService.createSwiftletFlowsFromXml(mockFile));
+        
+        assertEquals("Empty File", exception.getMessage());
+        verify(errorMessageService).registerError(null, null, mockErrorCodeSetup, null, null);
+    }
+
+    @Test
+    void testCreateSwiftletFlowsFromXml_ZipExtractionFails_ThrowsTchBusinessException() throws Exception {
+        when(mockFile.isEmpty()).thenReturn(false);
+        when(mockFile.getBytes()).thenReturn(new byte[]{1, 2, 3});
+        
+        // Mock S3 upload failure or Zip extraction failure
+        doThrow(new RuntimeException("S3 Upload Failed")).when(documentReportService).uploadFileS3(any(), anyString(), anyBoolean());
+        when(errorCodeSetupService.findByErrorCode(TchErrorCode.ERR_TCH_BUSINESS.getCode())).thenReturn(mockErrorCodeSetup);
+
+        assertThrows(TchBusinessException.class, 
+            () -> dpProcessingService.createSwiftletFlowsFromXml(mockFile));
+        
+        verify(errorMessageService).registerError(null, null, mockErrorCodeSetup, null, null);
+    }
+
+    @Test
+    void testCreateSwiftletFlowsFromXml_NoXmlFoundInZip_ThrowsBadRequestException() throws Exception {
+        when(mockFile.isEmpty()).thenReturn(false);
+        when(mockFile.getBytes()).thenReturn(new byte[]{1, 2, 3});
+        
+        try (MockedStatic<ZipUtils> zipUtilsMock = mockStatic(ZipUtils.class)) {
+            // Mock zip containing a file that doesn't end with .xml
+            when(mockXmlFile.getOriginalFilename()).thenReturn("document.pdf");
+            zipUtilsMock.when(() -> ZipUtils.extractZipFiles(mockFile)).thenReturn(List.of(mockXmlFile));
+            
+            when(errorCodeSetupService.findByErrorCode(TchErrorCode.EMPTY_MULTIPART_FILE.getCode())).thenReturn(mockErrorCodeSetup);
+            when(mockErrorCodeSetup.getDescription()).thenReturn("No XML Found");
+
+            BadRequestException exception = assertThrows(BadRequestException.class, 
+                () -> dpProcessingService.createSwiftletFlowsFromXml(mockFile));
+            
+            assertEquals("No XML Found", exception.getMessage());
+        }
+    }
+
+    @Test
+    void testCreateSwiftletFlowsFromXml_XmlUnmarshalFails_ThrowsTchBusinessException() throws Exception {
+        when(mockFile.isEmpty()).thenReturn(false);
+        when(mockFile.getBytes()).thenReturn(new byte[]{1, 2, 3});
+        
+        try (MockedStatic<ZipUtils> zipUtilsMock = mockStatic(ZipUtils.class);
+             MockedStatic<XmlUtils> xmlUtilsMock = mockStatic(XmlUtils.class)) {
+            
+            when(mockXmlFile.getOriginalFilename()).thenReturn("data.xml");
+            InputStream dummyStream = new ByteArrayInputStream("bad xml".getBytes());
+            when(mockXmlFile.getInputStream()).thenReturn(dummyStream);
+            
+            zipUtilsMock.when(() -> ZipUtils.extractZipFiles(mockFile)).thenReturn(List.of(mockXmlFile));
+            
+            // Force unmarshal to throw exception
+            xmlUtilsMock.when(() -> XmlUtils.unmarshalWithoutIntrospector(any(), eq(ElTnxRecord.class)))
+                        .thenThrow(new RuntimeException("Parse error"));
+
+            assertThrows(TchBusinessException.class, 
+                () -> dpProcessingService.createSwiftletFlowsFromXml(mockFile));
+        }
+    }
+
+    @Test
+    void testCreateSwiftletFlowsFromXml_RoutingSetupNotFound_ThrowsBadRequestException() throws Exception {
+        when(mockFile.isEmpty()).thenReturn(false);
+        when(mockFile.getBytes()).thenReturn(new byte[]{1, 2, 3});
+        
+        ElTnxRecord dummyRecord = new ElTnxRecord();
+        dummyRecord.setBeneficiaryReference("BENE123");
+        dummyRecord.setBoRefId("BOREF123");
+
+        try (MockedStatic<ZipUtils> zipUtilsMock = mockStatic(ZipUtils.class);
+             MockedStatic<XmlUtils> xmlUtilsMock = mockStatic(XmlUtils.class);
+             MockedStatic<DigestUtils> digestUtilsMock = mockStatic(DigestUtils.class)) {
+            
+            when(mockXmlFile.getOriginalFilename()).thenReturn("data.xml");
+            zipUtilsMock.when(() -> ZipUtils.extractZipFiles(mockFile)).thenReturn(List.of(mockXmlFile));
+            xmlUtilsMock.when(() -> XmlUtils.unmarshalWithoutIntrospector(any(), eq(ElTnxRecord.class))).thenReturn(dummyRecord);
+            xmlUtilsMock.when(() -> XmlUtils.marshall(any(), eq(ElTnxRecord.class))).thenReturn("<xml></xml>");
+            digestUtilsMock.when(() -> DigestUtils.sha256Hex(anyString())).thenReturn("CHECKSUM123");
+
+            // Mock routing not found
+            when(routingSetupService.findRoutingSetupByCriteria(any(RoutingSetupCriteriaDto.class))).thenReturn(null);
+            
+            when(errorCodeSetupService.findByErrorCode(TchErrorCode.ROUTING_NOT_FOUND.getCode())).thenReturn(mockErrorCodeSetup);
+            when(mockErrorCodeSetup.getDescription()).thenReturn("Routing Not Found");
+
+            BadRequestException exception = assertThrows(BadRequestException.class, 
+                () -> dpProcessingService.createSwiftletFlowsFromXml(mockFile));
+            
+            assertEquals("Routing Not Found", exception.getMessage());
+            verify(errorLogHandler).logError(any(), any(), isNull(), eq(DpProcessingServiceImpl.class));
+        }
+    }
+
+    @Test
+    void testCreateSwiftletFlowsFromXml_MappingException_HandledCorrectly() throws Exception {
+        when(mockFile.isEmpty()).thenReturn(false);
+        when(mockFile.getBytes()).thenReturn(new byte[]{1, 2, 3});
+        
+        ElTnxRecord dummyRecord = new ElTnxRecord();
+        RoutingSetup mockRouting = new RoutingSetup();
+
+        try (MockedStatic<ZipUtils> zipUtilsMock = mockStatic(ZipUtils.class);
+             MockedStatic<XmlUtils> xmlUtilsMock = mockStatic(XmlUtils.class);
+             MockedStatic<DigestUtils> digestUtilsMock = mockStatic(DigestUtils.class)) {
+            
+            when(mockXmlFile.getOriginalFilename()).thenReturn("data.xml");
+            zipUtilsMock.when(() -> ZipUtils.extractZipFiles(mockFile)).thenReturn(List.of(mockXmlFile));
+            xmlUtilsMock.when(() -> XmlUtils.unmarshalWithoutIntrospector(any(), eq(ElTnxRecord.class))).thenReturn(dummyRecord);
+            xmlUtilsMock.when(() -> XmlUtils.marshall(any(), eq(ElTnxRecord.class))).thenReturn("<xml></xml>");
+            digestUtilsMock.when(() -> DigestUtils.sha256Hex(anyString())).thenReturn("CHECKSUM");
+
+            when(routingSetupService.findRoutingSetupByCriteria(any())).thenReturn(mockRouting);
+            
+            // Force transaction processing to throw MappingException
+            doThrow(new MappingException("Mapping failed")).when(transactionService).saveTransaction(any());
+            
+            when(errorCodeSetupService.findByErrorCode(TchErrorCode.ERR_MAPPING_REQUEST.getCode())).thenReturn(mockErrorCodeSetup);
+
+            assertThrows(MappingException.class, 
+                () -> dpProcessingService.createSwiftletFlowsFromXml(mockFile));
+                
+            verify(errorLogHandler).logError(any(), any(), eq(mockRouting), eq(DpProcessingServiceImpl.class));
+        }
+    }
+
+    @Test
+    void testCreateSwiftletFlowsFromXml_EntityNotFoundException_HandledCorrectly() throws Exception {
+        when(mockFile.isEmpty()).thenReturn(false);
+        when(mockFile.getBytes()).thenReturn(new byte[]{1, 2, 3});
+        
+        ElTnxRecord dummyRecord = new ElTnxRecord();
+        RoutingSetup mockRouting = new RoutingSetup();
+
+        try (MockedStatic<ZipUtils> zipUtilsMock = mockStatic(ZipUtils.class);
+             MockedStatic<XmlUtils> xmlUtilsMock = mockStatic(XmlUtils.class);
+             MockedStatic<DigestUtils> digestUtilsMock = mockStatic(DigestUtils.class)) {
+            
+            when(mockXmlFile.getOriginalFilename()).thenReturn("data.xml");
+            zipUtilsMock.when(() -> ZipUtils.extractZipFiles(mockFile)).thenReturn(List.of(mockXmlFile));
+            xmlUtilsMock.when(() -> XmlUtils.unmarshalWithoutIntrospector(any(), eq(ElTnxRecord.class))).thenReturn(dummyRecord);
+            xmlUtilsMock.when(() -> XmlUtils.marshall(any(), eq(ElTnxRecord.class))).thenReturn("<xml></xml>");
+            digestUtilsMock.when(() -> DigestUtils.sha256Hex(anyString())).thenReturn("CHECKSUM");
+
+            when(routingSetupService.findRoutingSetupByCriteria(any())).thenReturn(mockRouting);
+            
+            doThrow(new EntityNotFoundException("Entity not found")).when(transactionService).saveTransaction(any());
+            
+            when(errorCodeSetupService.findByErrorCode(TchErrorCode.ENTITY_NOT_FOUND.getCode())).thenReturn(mockErrorCodeSetup);
+
+            assertThrows(EntityNotFoundException.class, 
+                () -> dpProcessingService.createSwiftletFlowsFromXml(mockFile));
+        }
+    }
+
+    // ========================================================================
+    // Tests for: updateFileActFlow
+    // ========================================================================
+
+    @Test
+    void testUpdateFileActFlow_EmptyFileList_ReturnsNull() {
+        DpTransaction transaction = new DpTransaction();
+        when(fileActFlowService.findFileActFlowByFileNameAndTypeAndDirection(
+            "test.zip", FileActType.HEADER, Direction.OUT)).thenReturn(Collections.emptyList());
+
+        DpFileActFlow result = dpProcessingService.updateFileActFlow(transaction, "test.zip");
+        assertNull(result);
+    }
+
+    @Test
+    void testUpdateFileActFlow_Success_UpdatesAndReturnsFlow() {
+        DpTransaction transaction = new DpTransaction();
+        transaction.setSenderId("SENDER123");
+        transaction.setReceiverId("RECEIVER123");
+        
+        DpFileActFlow mockFlow = new DpFileActFlow();
+        when(fileActFlowService.findFileActFlowByFileNameAndTypeAndDirection(
+            "test.zip", FileActType.HEADER, Direction.OUT)).thenReturn(List.of(mockFlow));
+        
+        when(fileActFlowService.getUnicRefFromSupplier()).thenReturn("UNIC_REF_123");
+        when(fileActFlowService.update(any(DpFileActFlow.class))).thenReturn(mockFlow);
+
+        DpFileActFlow result = dpProcessingService.updateFileActFlow(transaction, "test.zip");
+        
+        assertNotNull(result);
+        assertEquals("SENDER123", result.getRequestorDn());
+        assertEquals("RECEIVER123", result.getResponderDn());
+        assertEquals("UNIC_REF_123", result.getUnicRef());
+        verify(transactionService).saveTransaction(transaction);
+        assertEquals("test.zip", transaction.getFileName());
+    }
+
+    // ========================================================================
+    // Tests for: saveFileAttachmentToS3
+    // ========================================================================
+
+    @Test
+    void testSaveFileAttachmentToS3_Success() {
+        DpFileActFlow fileActFlow = new DpFileActFlow();
+        byte[] zipFile = new byte[]{1, 2, 3};
+        String fileName = "attachment.zip";
+
+        String result = dpProcessingService.saveFileAttachmentToS3(fileActFlow, zipFile, fileName);
+
+        verify(documentReportService).uploadFileS3(zipFile, "/test/s3/path/attachment.zip", false);
+        assertEquals(fileName, result);
+        assertEquals(fileName, fileActFlow.getFileName());
+        assertEquals(fileName, fileActFlow.getLogicalName());
+        assertEquals("attachment", fileActFlow.getUnicRef()); // Extracts correctly without .zip
+        
+        verify(fileActFlowService).processFileActFlow(
+            fileActFlow, TransactionStatus.RECEIVED, MandatoryType.NO, FileActType.HEADER, Direction.OUT);
+    }
+
+    @Test
+    void testSaveFileAttachmentToS3_NullFileName() {
+        DpFileActFlow fileActFlow = new DpFileActFlow();
+        byte[] zipFile = new byte[]{1, 2, 3};
+
+        String result = dpProcessingService.saveFileAttachmentToS3(fileActFlow, zipFile, null);
+
+        // Verifies the file still uploads, but doesn't set properties on the flow since fileName is null
+        verify(documentReportService).uploadFileS3(zipFile, "/test/s3/path/null", false);
+        assertNull(result);
+        assertNull(fileActFlow.getFileName());
+    }
+
+    // ========================================================================
+    // Tests for: mapFileActFlow
+    // ========================================================================
+
+    @Test
+    void testMapFileActFlow_WithProdService() {
+        // swiftUseTestBic contains "false" as initialized in @BeforeEach
+        String zipFileName = "my_archive.zip";
+        
+        DpFileActFlow result = dpProcessingService.mapFileActFlow(zipFileName);
+        
+        assertEquals(DpProcessingServiceImpl.FILE_ACT_FLOW_REQUEST_TYPE, result.getRequestType());
+        assertEquals(DpProcessingServiceImpl.FILE_ACT_FLOW_SERVICE_NAME_PROD, result.getServiceName());
+        assertEquals(DpProcessingServiceImpl.FILE_ACT_FLOW_FILE_INFO, result.getFileInfo());
+        assertEquals(DpProcessingServiceImpl.FILE_ACT_FLOW_JURIDICTION, result.getJuridiction());
+        assertEquals(Long.valueOf(zipFileName.length()), result.getFileSize());
+        assertEquals(zipFileName, result.getFileName());
+        assertEquals(zipFileName, result.getOriginalName());
+        assertEquals(zipFileName, result.getLogicalName());
+    }
+
+    @Test
+    void testMapFileActFlow_WithQaService() {
+        // Change property to simulate QA environment
+        ReflectionTestUtils.setField(dpProcessingService, "swiftUseTestBic", "true");
+        String zipFileName = "my_qa_archive.zip";
+        
+        DpFileActFlow result = dpProcessingService.mapFileActFlow(zipFileName);
+        
+        assertEquals(DpProcessingServiceImpl.FILE_ACT_FLOW_SERVICE_NAME_QA, result.getServiceName());
+    }
+}
