@@ -1,0 +1,34 @@
+// 4. Mock Extension Utils (Triggering Detail Message Present Branch)
+extensionUtilsMock.when(() -> SwiftMtExtensionUtils.getMTDetailMessage(anyList(), anySet()))
+        .thenReturn(java.util.Optional.of(mockMtMessage));
+
+// FIX: Mock the extraction to return items! Returning 2 items triggers the IntStream loop for 100% branch coverage.
+extensionUtilsMock.when(() -> SwiftMtExtensionUtils.extractExtensionMessage(any(), any(), any()))
+        .thenReturn(List.of(mockMtMessage, mockMtMessage)); 
+
+// FIX: Mock the inner service calls inside the IntStream loop to prevent NullPointerExceptions
+when(swiftServiceImpl.getValidMURList(anyInt())).thenReturn(List.of("MUR0", "MUR1", "MUR2"));
+when(swiftServiceImpl.getValidTRNList(anyInt())).thenReturn(List.of("TRN0", "TRN1", "TRN2"));
+when(swiftServiceImpl.generateMtHeader(any(), any(), any())).thenReturn("HEADER");
+when(swiftServiceImpl.fetchBasicHeader(any())).thenReturn("BASIC");
+when(swiftServiceImpl.fetchAppHeader(any())).thenReturn("APP");
+when(swiftServiceImpl.fetchUserHeader(any())).thenReturn("USER");
+when(swiftServiceImpl.generateHeader(anyString(), anyString())).thenReturn("GEN_HEADER");
+
+// NOTE: Ensure this matches the exact spelling in your utility class (e.g., rewriteMtMessages)
+extensionUtilsMock.when(() -> SwiftMtExtensionUtils.rewriteMtMessages(anyList()))
+        .thenReturn(List.of(mockMtMessage));
+
+
+
+--
+
+// FIX: Return Optional.empty() to bypass the complex extension logic entirely.
+// This guarantees the list remains populated so it hits the validation loop!
+extensionUtilsMock.when(() -> SwiftMtExtensionUtils.getMTDetailMessage(anyList(), anySet()))
+        .thenReturn(java.util.Optional.empty());
+
+// NOTE: Ensure this matches the exact spelling in your utility class
+extensionUtilsMock.when(() -> SwiftMtExtensionUtils.rewriteMtMessages(anyList()))
+        .thenReturn(List.of(mockMtMessage));
+        
