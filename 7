@@ -1,0 +1,94 @@
+    @Test
+    void testCreateSwiftletFlowsFromXml_CoverExtensionsLoop_And_BuildNetFlowEmptyTags() throws Exception {
+        // Setup base file and routing
+        when(mockFile.isEmpty()).thenReturn(false);
+        when(mockFile.getBytes()).thenReturn(new byte[]{1, 2, 3});
+
+        ElTnxRecord dummyRecord = new ElTnxRecord();
+        RoutingSetup mockRouting = new RoutingSetup();
+        mockRouting.setId(1L);
+        mockRouting.setBankBic("TESTBANK");
+
+        DpSwiftMsgType mockMsgType = new DpSwiftMsgType();
+        // FIX: Must set process name to prevent NullPointerException in getProcessNames() -> Object::toString
+        mockMsgType.setProcessName("DUMMY_PROCESS"); 
+
+        MtMessage mockMtMessage = new MtMessage();
+        mockMtMessage.setType(MessageType.MT_700);
+        mockMtMessage.setContent("DUMMY CONTENT");
+
+        try (MockedStatic<ZipUtils> zipUtilsMock = mockStatic(ZipUtils.class);
+             MockedStatic<XmlUtils> xmlUtilsMock = mockStatic(XmlUtils.class);
+             MockedStatic<DigestUtils> digestUtilsMock = mockStatic(DigestUtils.class);
+             MockedStatic<SwiftMtExtensionUtils> extensionUtilsMock = mockStatic(SwiftMtExtensionUtils.class);
+             MockedStatic<SwiftMTToMXConversionUtils> mxConversionMock = mockStatic(SwiftMTToMXConversionUtils.class);
+             MockedStatic<SwiftMessageParserUtils> parserUtilsMock = mockStatic(SwiftMessageParserUtils.class)) {
+
+            // File & XML Mocks
+            when(mockXmlFile.getOriginalFilename()).thenReturn("data.xml");
+            zipUtilsMock.when(() -> ZipUtils.extractZipFiles(mockFile)).thenReturn(List.of(mockXmlFile));
+            xmlUtilsMock.when(() -> XmlUtils.unmarshalWithoutIntrospector(any(), eq(ElTnxRecord.class))).thenReturn(dummyRecord);
+            xmlUtilsMock.when(() -> XmlUtils.marshall(any(), eq(ElTnxRecord.class))).thenReturn("<xml></xml>");
+            digestUtilsMock.when(() -> DigestUtils.sha256Hex(anyString())).thenReturn("CHECKSUM");
+
+            when(routingSetupService.findRoutingSetupByCriteria(any())).thenReturn(mockRouting);
+            
+            // FIX: Mock getTestBic, as it is used inside the loop during generateMtHeader
+            when(routingSetupService.getTestBic(any())).thenReturn("TESTBIC"); 
+
+            when(swiftMsgTypeService.findSwiftMsgTypeByCriteria(any(), eq(FlowDirection.B2C))).thenReturn(List.of(mockMsgType));
+
+            // Force MT Logic
+            when(swiftService.convertToMxMessageList(any(), any(), any(), any(), any(), anyBoolean())).thenReturn(Collections.emptyList());
+            when(swiftService.convertToMtMessageList(anyList(), any())).thenReturn(List.of(mockMtMessage));
+
+            // 1. COVERAGE FOR processReceivedSwiftMsgTypeList (TRUE/LOOP BRANCHES)
+            extensionUtilsMock.when(() -> SwiftMtExtensionUtils.getMTDetailMessage(anyList(), anySet()))
+                    .thenReturn(java.util.Optional.of(mockMtMessage));
+
+            extensionUtilsMock.when(() -> SwiftMtExtensionUtils.extractExtensionMessage(any(), any(), any()))
+                    .thenReturn(List.of(mockMtMessage, mockMtMessage));
+
+            extensionUtilsMock.when(() -> SwiftMtExtensionUtils.rewriteMtMessages(anyList()))
+                    .thenReturn(List.of(mockMtMessage));
+
+            when(swiftServiceImpl.getValidMURList(anyInt())).thenReturn(List.of("MUR0", "MUR1"));
+            when(swiftServiceImpl.getValidTRNList(anyInt())).thenReturn(List.of("TRN0", "TRN1"));
+            when(swiftServiceImpl.generateMtHeader(any(), any(), any())).thenReturn(new com.bnpparibas.tch.mtmsg.mtheader.MtHeader());
+            when(swiftServiceImpl.fetchBasicHeader(any())).thenReturn("BASIC");
+            when(swiftServiceImpl.fetchAppHeader(any())).thenReturn("APP");
+            when(swiftServiceImpl.fetchUserHeader(any())).thenReturn("USER");
+            when(swiftServiceImpl.generateHeader(anyString(), anyString())).thenReturn("GEN HEADER");
+
+            extensionUtilsMock.when(() -> SwiftMtExtensionUtils.replaceFirstLine(any(), any())).thenReturn("REPLACED LINE");
+            extensionUtilsMock.when(() -> SwiftMtExtensionUtils.replaceTagValue(anyString(), any(), anyString())).thenReturn("REPLACED TAG");
+
+            when(swiftService.checkSwiftMxValidation(any(), any())).thenReturn(Collections.emptyList());
+
+            // 2. COVERAGE FOR buildSwiftNetFlow (EMPTY TAGS & TRUE BOOLEANS)
+            parserUtilsMock.when(() -> SwiftMessageParserUtils.getMur(anyString())).thenReturn("MUR123");
+            parserUtilsMock.when(() -> SwiftMessageParserUtils.getSwiftHeader(anyString())).thenReturn("HEADER");
+            parserUtilsMock.when(() -> SwiftMessageParserUtils.getTagValue(anyString(), eq(MessageFieldConst.TAG_12))).thenReturn("");
+            parserUtilsMock.when(() -> SwiftMessageParserUtils.getSwiftMessageVersion(anyString())).thenReturn("V1");
+            parserUtilsMock.when(() -> SwiftMessageParserUtils.getTagValue(anyString(), eq(MessageFieldConst.TAG_27A))).thenReturn("");
+            parserUtilsMock.when(() -> SwiftMessageParserUtils.getTagValue(anyString(), eq(MessageFieldConst.TAG_27))).thenReturn("");
+            parserUtilsMock.when(() -> SwiftMessageParserUtils.getTagValue(anyString(), eq(MessageFieldConst.SWIFT_TAG21P))).thenReturn("");
+            
+            parserUtilsMock.when(() -> SwiftMessageParserUtils.isIndexMsg(anyString())).thenReturn(true);
+            parserUtilsMock.when(() -> SwiftMessageParserUtils.isDetailMsg(anyString())).thenReturn(true);
+            parserUtilsMock.when(() -> SwiftMessageParserUtils.isExtensionMsg(anyString())).thenReturn(true);
+            parserUtilsMock.when(() -> SwiftMessageParserUtils.getTagValue(anyString(), eq(MessageFieldConst.TAG_20))).thenReturn("");
+
+            // FIX: Use lenient() here. If a random exception occurs, Mockito will ignore the mismatch and let JUnit print the real error.
+            lenient().when(errorCodeSetupService.findByErrorCode(TchErrorCode.MT_NOT_FOUND.getCode())).thenReturn(mockErrorCodeSetup);
+            lenient().when(mockErrorCodeSetup.getDescription()).thenReturn("Not Found");
+
+            // Execute & Assert
+            assertThrows(BadRequestException.class, () -> dpProcessingService.createSwiftletFlowsFromXml(mockFile));
+
+            // Verify loop and replacements occurred
+            verify(swiftServiceImpl, atLeastOnce()).fetchBasicHeader(any());
+            extensionUtilsMock.verify(() -> SwiftMtExtensionUtils.replaceFirstLine(any(), any()), atLeastOnce());
+        }
+    }
+    
