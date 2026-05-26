@@ -1,0 +1,44 @@
+            // ====================================================================
+            // 1. STUB BOTH INTERFACES AND IMPLEMENTATIONS 
+            // ====================================================================
+            // (Note: Check your spelling! If your method is literally spelled 'convertTollMessageList' 
+            // in your Java class as your stack trace suggests, change the method name below to match it!)
+            lenient().when(swiftService.convertToMxMessageList(any(), any(), any(), any(), any(), anyBoolean())).thenReturn(Collections.emptyList());
+            lenient().when(swiftServiceImpl.convertToMxMessageList(any(), any(), any(), any(), any(), anyBoolean())).thenReturn(Collections.emptyList());
+            
+            lenient().when(swiftService.convertToMtMessageList(any(), any())).thenReturn(List.of(mockMtMessage));
+            lenient().when(swiftServiceImpl.convertToMtMessageList(any(), any())).thenReturn(List.of(mockMtMessage));
+
+            // ====================================================================
+            // 2. COVERAGE FOR processReceivedSwiftMsgTypeList (TRUE/LOOP BRANCHES)
+            // ====================================================================
+            
+            // FIX: Use any(), any() instead of anyList(), anySet() to guarantee a match
+            extensionUtilsMock.when(() -> SwiftMtExtensionUtils.getMTDetailMessage(any(), any()))
+                    .thenReturn(java.util.Optional.of(mockMtMessage));
+
+            // FIX: Stub BOTH possible spellings of the extract method just in case, using any()
+            extensionUtilsMock.lenient().when(() -> SwiftMtExtensionUtils.extractExtensionMessage(any(), any(), any()))
+                    .thenReturn(List.of(mockMtMessage, mockMtMessage));
+            extensionUtilsMock.lenient().when(() -> SwiftMtExtensionUtils.extractMtExtensionMessage(any(), any(), any()))
+                    .thenReturn(List.of(mockMtMessage, mockMtMessage));
+
+            extensionUtilsMock.when(() -> SwiftMtExtensionUtils.rewriteMtMessages(any()))
+                    .thenReturn(List.of(mockMtMessage));
+
+            // Mock string replacement utilities called inside the IntStream loop
+            lenient().when(swiftServiceImpl.getValidMURList(anyInt())).thenReturn(List.of("MUR0", "MUR1"));
+            lenient().when(swiftServiceImpl.getValidTRNList(anyInt())).thenReturn(List.of("TRN0", "TRN1"));
+            lenient().when(swiftServiceImpl.generateMtHeader(any(), any(), any())).thenReturn(new com.bnpparibas.tch.mtmsg.mtheader.MtHeader());
+            lenient().when(swiftServiceImpl.fetchBasicHeader(any())).thenReturn("BASIC");
+            lenient().when(swiftServiceImpl.fetchAppHeader(any())).thenReturn("APP");
+            lenient().when(swiftServiceImpl.fetchUserHeader(any())).thenReturn("USER");
+            lenient().when(swiftServiceImpl.generateHeader(anyString(), anyString())).thenReturn("GEN HEADER");
+
+            extensionUtilsMock.lenient().when(() -> SwiftMtExtensionUtils.replaceFirstLine(any(), any())).thenReturn("REPLACED LINE");
+            extensionUtilsMock.lenient().when(() -> SwiftMtExtensionUtils.replaceTagValue(anyString(), any(), anyString())).thenReturn("REPLACED TAG");
+
+            // Mock Validation to be empty so it continues
+            lenient().when(swiftService.checkSwiftMxValidation(any(), any())).thenReturn(Collections.emptyList());
+            lenient().when(swiftServiceImpl.checkSwiftMxValidation(any(), any())).thenReturn(Collections.emptyList());
+            
