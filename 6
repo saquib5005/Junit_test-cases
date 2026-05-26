@@ -1,0 +1,182 @@
+    // ========================================================================
+    // DEEP COVERAGE: processReceivedSwiftMsgTypeList & buildSwiftNetFlow
+    // ========================================================================
+
+    @Test
+    void testCreateSwiftletFlowsFromXml_CoverExtensionsLoop_And_BuildNetFlowEmptyTags() throws Exception {
+        // Setup base file and routing
+        when(mockFile.isEmpty()).thenReturn(false);
+        when(mockFile.getBytes()).thenReturn(new byte[]{1, 2, 3});
+
+        ElTnxRecord dummyRecord = new ElTnxRecord();
+        RoutingSetup mockRouting = new RoutingSetup();
+        mockRouting.setId(1L);
+        mockRouting.setBankBic("TESTBANK");
+
+        DpSwiftMsgType mockMsgType = new DpSwiftMsgType();
+        MtMessage mockMtMessage = new MtMessage();
+        mockMtMessage.setType(MessageType.MT_700);
+        mockMtMessage.setContent("DUMMY_CONTENT");
+
+        try (MockedStatic<ZipUtils> zipUtilsMock = mockStatic(ZipUtils.class);
+             MockedStatic<XmlUtils> xmlUtilsMock = mockStatic(XmlUtils.class);
+             MockedStatic<DigestUtils> digestUtilsMock = mockStatic(DigestUtils.class);
+             MockedStatic<SwiftMtExtensionUtils> extensionUtilsMock = mockStatic(SwiftMtExtensionUtils.class);
+             MockedStatic<SwiftMTToMXConversionUtils> mxConversionMock = mockStatic(SwiftMTToMXConversionUtils.class); // Use your actual class name here
+             MockedStatic<SwiftMessageParserUtils> parserUtilsMock = mockStatic(SwiftMessageParserUtils.class)) {
+
+            // File & XML Mocks
+            when(mockXmlFile.getOriginalFilename()).thenReturn("data.xml");
+            zipUtilsMock.when(() -> ZipUtils.extractZipFiles(mockFile)).thenReturn(List.of(mockXmlFile));
+            xmlUtilsMock.when(() -> XmlUtils.unmarshalWithoutIntrospector(any(), eq(ElTnxRecord.class))).thenReturn(dummyRecord);
+            xmlUtilsMock.when(() -> XmlUtils.marshall(any(), eq(ElTnxRecord.class))).thenReturn("<xml></xml>");
+
+            when(routingSetupService.findRoutingSetupByCriteria(any())).thenReturn(mockRouting);
+            when(swiftMsgTypeService.findSwiftMsgTypeByCriteria(any(), eq(FlowDirection.B2C))).thenReturn(List.of(mockMsgType));
+            
+            // Force MT Logic
+            when(swiftService.convertToMxMessageList(any(), any(), any(), any(), any(), anyBoolean())).thenReturn(Collections.emptyList());
+            when(swiftService.convertToMtMessageList(anyList(), any())).thenReturn(List.of(mockMtMessage));
+
+            // ====================================================================
+            // 1. COVERAGE FOR processReceivedSwiftMsgTypeList (TRUE/LOOP BRANCHES)
+            // ====================================================================
+            extensionUtilsMock.when(() -> SwiftMtExtensionUtils.getMTDetailMessage(anyList(), anySet()))
+                    .thenReturn(java.util.Optional.of(mockMtMessage)); // Triggers !detailMessage.isEmpty()
+            
+            // Return size 2 to trigger the IntStream.range(1, extensionMessages.size()) loop!
+            extensionUtilsMock.when(() -> SwiftMtExtensionUtils.extractExtensionMessage(any(), any(), any()))
+                    .thenReturn(List.of(mockMtMessage, mockMtMessage)); 
+                    
+            extensionUtilsMock.when(() -> SwiftMtExtensionUtils.rewriteMtMessages(anyList()))
+                    .thenReturn(List.of(mockMtMessage));
+            
+            // Mock string replacement utilities called inside the IntStream loop
+            when(swiftServiceImpl.getValidMURList(anyInt())).thenReturn(List.of("MUR0", "MUR1"));
+            when(swiftServiceImpl.getValidTRNList(anyInt())).thenReturn(List.of("TRN0", "TRN1"));
+            when(swiftServiceImpl.generateMtHeader(any(), any(), any())).thenReturn("UPD_HEADER");
+            when(swiftServiceImpl.fetchBasicHeader(any())).thenReturn("BASIC");
+            when(swiftServiceImpl.fetchAppHeader(any())).thenReturn("APP");
+            when(swiftServiceImpl.fetchUserHeader(any())).thenReturn("USER");
+            when(swiftServiceImpl.generateHeader(anyString(), anyString())).thenReturn("GEN_HEADER");
+            extensionUtilsMock.when(() -> SwiftMtExtensionUtils.replaceFirstLine(any(), any())).thenReturn("REPLACED_LINE");
+            extensionUtilsMock.when(() -> SwiftMtExtensionUtils.replaceTagValue(anyString(), any(), anyString())).thenReturn("REPLACED_TAG");
+
+            // Mock Validation to be empty so it continues
+            when(swiftService.checkSwiftMxValidation(any(), any())).thenReturn(Collections.emptyList());
+
+            // ====================================================================
+            // 2. COVERAGE FOR buildSwiftNetFlow (EMPTY TAGS & TRUE BOOLEANS)
+            // ====================================================================
+            parserUtilsMock.when(() -> SwiftMessageParserUtils.getMur(anyString())).thenReturn("MUR123");
+            parserUtilsMock.when(() -> SwiftMessageParserUtils.getSwiftHeader(anyString())).thenReturn("HEADER");
+            
+            // Force empty strings to trigger the ternary fallback paths
+            parserUtilsMock.when(() -> SwiftMessageParserUtils.getTagValue(anyString(), eq(MessageFieldConst.TAG_12))).thenReturn("");
+            parserUtilsMock.when(() -> SwiftMessageParserUtils.getSwiftMessageVersion(anyString())).thenReturn("V1");
+            
+            parserUtilsMock.when(() -> SwiftMessageParserUtils.getTagValue(anyString(), eq(MessageFieldConst.TAG_27A))).thenReturn("");
+            parserUtilsMock.when(() -> SwiftMessageParserUtils.getTagValue(anyString(), eq(MessageFieldConst.TAG_27))).thenReturn("");
+            
+            // Force blank Bank Ref Number to bypass the substring(2) branch
+            parserUtilsMock.when(() -> SwiftMessageParserUtils.getTagValue(anyString(), eq(MessageFieldConst.SWIFT_TAG21P))).thenReturn("");
+            
+            // Force true booleans
+            parserUtilsMock.when(() -> SwiftMessageParserUtils.isIndexMsg(anyString())).thenReturn(true);
+            parserUtilsMock.when(() -> SwiftMessageParserUtils.isDetailMsg(anyString())).thenReturn(true);
+            parserUtilsMock.when(() -> SwiftMessageParserUtils.isExtensionMsg(anyString())).thenReturn(true);
+            
+            // Force empty TRN to bypass the setTransactionRefNumber logic
+            parserUtilsMock.when(() -> SwiftMessageParserUtils.getTagValue(anyString(), eq(MessageFieldConst.TAG_20))).thenReturn("");
+
+            // Setup the fallback exception that occurs at the end of the method
+            when(errorCodeSetupService.findByErrorCode(TchErrorCode.MT_NOT_FOUND.getCode())).thenReturn(mockErrorCodeSetup);
+            when(mockErrorCodeSetup.getDescription()).thenReturn("Not Found");
+
+            // Execute & Assert
+            assertThrows(BadRequestException.class, () -> dpProcessingService.createSwiftletFlowsFromXml(mockFile));
+            
+            // Verify loop and replacements occurred
+            verify(swiftServiceImpl, atLeastOnce()).fetchBasicHeader(anyString());
+            extensionUtilsMock.verify(() -> SwiftMtExtensionUtils.replaceFirstLine(any(), any()), atLeastOnce());
+        }
+    }
+
+    @Test
+    void testCreateSwiftletFlowsFromXml_NoExtensions_And_BuildNetFlowPopulatedTags() throws Exception {
+        // Setup base file and routing
+        when(mockFile.isEmpty()).thenReturn(false);
+        when(mockFile.getBytes()).thenReturn(new byte[]{1, 2, 3});
+
+        ElTnxRecord dummyRecord = new ElTnxRecord();
+        RoutingSetup mockRouting = new RoutingSetup();
+        mockRouting.setId(1L);
+
+        DpSwiftMsgType mockMsgType = new DpSwiftMsgType();
+        MtMessage mockMtMessage = new MtMessage();
+        mockMtMessage.setType(MessageType.MT_700);
+        mockMtMessage.setContent("DUMMY_CONTENT");
+
+        try (MockedStatic<ZipUtils> zipUtilsMock = mockStatic(ZipUtils.class);
+             MockedStatic<XmlUtils> xmlUtilsMock = mockStatic(XmlUtils.class);
+             MockedStatic<SwiftMtExtensionUtils> extensionUtilsMock = mockStatic(SwiftMtExtensionUtils.class);
+             MockedStatic<SwiftMTToMXConversionUtils> mxConversionMock = mockStatic(SwiftMTToMXConversionUtils.class); 
+             MockedStatic<SwiftMessageParserUtils> parserUtilsMock = mockStatic(SwiftMessageParserUtils.class)) {
+
+            when(mockXmlFile.getOriginalFilename()).thenReturn("data.xml");
+            zipUtilsMock.when(() -> ZipUtils.extractZipFiles(mockFile)).thenReturn(List.of(mockXmlFile));
+            xmlUtilsMock.when(() -> XmlUtils.unmarshalWithoutIntrospector(any(), eq(ElTnxRecord.class))).thenReturn(dummyRecord);
+            xmlUtilsMock.when(() -> XmlUtils.marshall(any(), eq(ElTnxRecord.class))).thenReturn("<xml></xml>");
+
+            when(routingSetupService.findRoutingSetupByCriteria(any())).thenReturn(mockRouting);
+            when(swiftMsgTypeService.findSwiftMsgTypeByCriteria(any(), eq(FlowDirection.B2C))).thenReturn(List.of(mockMsgType));
+            
+            when(swiftService.convertToMxMessageList(any(), any(), any(), any(), any(), anyBoolean())).thenReturn(Collections.emptyList());
+            when(swiftService.convertToMtMessageList(anyList(), any())).thenReturn(List.of(mockMtMessage));
+
+            // ====================================================================
+            // 1. COVERAGE FOR processReceivedSwiftMsgTypeList (FALSE BRANCHES)
+            // ====================================================================
+            // Return empty to trigger the `else` block (mtMessages.addAll(mtMessageList))
+            extensionUtilsMock.when(() -> SwiftMtExtensionUtils.getMTDetailMessage(anyList(), anySet()))
+                    .thenReturn(java.util.Optional.empty()); 
+                    
+            extensionUtilsMock.when(() -> SwiftMtExtensionUtils.rewriteMtMessages(anyList()))
+                    .thenReturn(List.of(mockMtMessage));
+
+            // Force validation error to hit the ERR_MAPPING_REQUEST branch
+            when(swiftService.checkSwiftMxValidation(any(), any())).thenReturn(List.of("Error occurred"));
+
+            // ====================================================================
+            // 2. COVERAGE FOR buildSwiftNetFlow (POPULATED TAGS & FALSE BOOLEANS)
+            // ====================================================================
+            parserUtilsMock.when(() -> SwiftMessageParserUtils.getMur(anyString())).thenReturn("MUR123");
+            parserUtilsMock.when(() -> SwiftMessageParserUtils.getSwiftHeader(anyString())).thenReturn("HEADER");
+            
+            // Force populated tags to bypass fallback logic
+            parserUtilsMock.when(() -> SwiftMessageParserUtils.getTagValue(anyString(), eq(MessageFieldConst.TAG_12))).thenReturn("SWIFT_NO");
+            parserUtilsMock.when(() -> SwiftMessageParserUtils.getTagValue(anyString(), eq(MessageFieldConst.TAG_27A))).thenReturn("SEQ_NO");
+            
+            // Force populated Bank Ref Number to trigger `.substring(2)`
+            // (Providing a string >= 2 chars avoids StringIndexOutOfBoundsException)
+            parserUtilsMock.when(() -> SwiftMessageParserUtils.getTagValue(anyString(), eq(MessageFieldConst.SWIFT_TAG21P))).thenReturn("BK123456");
+            
+            // Force false booleans
+            parserUtilsMock.when(() -> SwiftMessageParserUtils.isIndexMsg(anyString())).thenReturn(false);
+            parserUtilsMock.when(() -> SwiftMessageParserUtils.isDetailMsg(anyString())).thenReturn(false);
+            parserUtilsMock.when(() -> SwiftMessageParserUtils.isExtensionMsg(anyString())).thenReturn(false);
+            
+            // Force populated TRN to trigger `.trim()` block
+            parserUtilsMock.when(() -> SwiftMessageParserUtils.getTagValue(anyString(), eq(MessageFieldConst.TAG_20))).thenReturn("TRN123 ");
+
+            // Setup the validation exception error code
+            when(errorCodeSetupService.findByErrorCode(TchErrorCode.ERR_MAPPING_REQUEST.getCode())).thenReturn(mockErrorCodeSetup);
+
+            // Execute & Assert
+            BadRequestException ex = assertThrows(BadRequestException.class, () -> dpProcessingService.createSwiftletFlowsFromXml(mockFile));
+            assertEquals("Error occurred", ex.getMessage());
+            
+            // Verify the swiftNetService save was still called before the validation exception threw
+            verify(swiftNetService).saveAllSwiftNetFlow(anyList());
+        }
+    }
