@@ -1,0 +1,238 @@
+import com.bnpparibas.tch.dp.util.SwiftMessageParserUtils;
+import com.bnpparibas.tch.dp.util.SwiftMtExtensionUtils;
+import com.bnpparibas.tch.dp.dto.MxMessageDto;
+import com.bnpparibas.tch.dp.dto.MtMessage;
+import com.bnpparibas.tch.dp.dto.odMessageDto;
+import com.bnpparibas.tch.dp.util.SwiftMT;
+
+
+    // ========================================================================
+    // Tests for: processTransactionWithRouting & handleFilesToZip & sendFileActMessageIfNeeded
+    // ========================================================================
+
+    @Test
+    void testCreateSwiftletFlowsFromXml_FullRouting_WithFiles_Success() throws Exception {
+        when(mockFile.isEmpty()).thenReturn(false);
+        when(mockFile.getBytes()).thenReturn(new byte[]{1, 2, 3});
+
+        ElTnxRecord dummyRecord = new ElTnxRecord();
+        RoutingSetup mockRouting = new RoutingSetup();
+        mockRouting.setId(1L);
+        mockRouting.setBankBic("TESTBANK");
+        mockRouting.setCustomerBic("CUSTBIC");
+
+        DpSwiftMsgType mockMsgType = new DpSwiftMsgType();
+        mockMsgType.setProcessName("Process1");
+
+        odMessageDto mockMxMessage = new odMessageDto();
+
+        try (MockedStatic<ZipUtils> zipUtilsMock = mockStatic(ZipUtils.class);
+             MockedStatic<XmlUtils> xmlUtilsMock = mockStatic(XmlUtils.class);
+             MockedStatic<DigestUtils> digestUtilsMock = mockStatic(DigestUtils.class)) {
+
+            // 1. Setup File and Extraction
+            when(mockXmlFile.getOriginalFilename()).thenReturn("data.xml");
+            zipUtilsMock.when(() -> ZipUtils.extractZipFiles(mockFile)).thenReturn(List.of(mockXmlFile, mockFile)); // 2 files to trigger file zipping
+            zipUtilsMock.when(() -> ZipUtils.createZipFiles(anyList())).thenReturn(new byte[]{9, 9, 9});
+
+            // 2. Setup XML Parsing
+            xmlUtilsMock.when(() -> XmlUtils.unmarshalWithoutIntrospector(any(), eq(ElTnxRecord.class))).thenReturn(dummyRecord);
+            xmlUtilsMock.when(() -> XmlUtils.marshall(any(), eq(ElTnxRecord.class))).thenReturn("<xml></xml>");
+            digestUtilsMock.when(() -> DigestUtils.sha256Hex(anyString())).thenReturn("CHECKSUM");
+
+            // 3. Setup Routing and Transaction
+            when(routingSetupService.findRoutingSetupByCriteria(any())).thenReturn(mockRouting);
+            when(routingSetupService.getTestBic(any())).thenReturn("TESTBIC");
+            when(requestService.saveRequest(any())).thenReturn(new DpXmlRequest());
+            
+            // 4. Force into processTransactionWithRouting
+            when(swiftMsgTypeService.findSwiftMsgTypeByCriteria(any(), eq(FlowDirection.B2C))).thenReturn(List.of(mockMsgType));
+            
+            // 5. Force processReceivedSwiftMsgTypeList into the MX path (list is not empty)
+            when(swiftService.convertToMxMessageList(any(), any(), any(), any(), any(), anyBoolean()))
+                .thenReturn(List.of(mockMxMessage)); // Bypasses the complex MT fallback
+
+            // 6. Setup FileAct Flow
+            when(fileActFlowService.getUnicRefFromSupplier()).thenReturn("UNIC_REF_123");
+            DpFileActFlow mockFileActFlow = new DpFileActFlow();
+            when(fileActFlowService.findFileActFlowByFileNameAndTypeAndDirection(anyString(), any(), any()))
+                .thenReturn(List.of(mockFileActFlow));
+            when(fileActFlowService.update(any())).thenReturn(mockFileActFlow);
+
+            // Execute
+            boolean result = dpProcessingService.createSwiftletFlowsFromXml(mockFile);
+
+            // Assertions & Verifications
+            assertTrue(result);
+            verify(transactionService, atLeastOnce()).saveTransaction(any(DpTransaction.class));
+            verify(documentReportService, atLeastOnce()).uploadFileS3(any(), anyString(), anyBoolean());
+            
+            // Verifies sendFileActMessageIfNeeded was triggered
+            verify(fileActSender).sendFileActMessage(any(DpFileActFlow.class), any(byte[].class));
+        }
+    }
+
+    @Test
+    void testCreateSwiftletFlowsFromXml_GenericException_HandledCorrectly() throws Exception {
+        when(mockFile.isEmpty()).thenReturn(false);
+        when(mockFile.getBytes()).thenReturn(new byte[]{1, 2, 3});
+        
+        try (MockedStatic<ZipUtils> zipUtilsMock = mockStatic(ZipUtils.class);
+             MockedStatic<XmlUtils> xmlUtilsMock = mockStatic(XmlUtils.class)) {
+            
+            when(mockXmlFile.getOriginalFilename()).thenReturn("data.xml");
+            zipUtilsMock.when(() -> ZipUtils.extractZipFiles(mockFile)).thenReturn(List.of(mockXmlFile));
+            xmlUtilsMock.when(() -> XmlUtils.unmarshalWithoutIntrospector(any(), eq(ElTnxRecord.class))).thenReturn(new ElTnxRecord());
+            xmlUtilsMock.when(() -> XmlUtils.marshall(any(), eq(ElTnxRecord.class))).thenReturn("<xml></xml>");
+            
+            // Force a generic exception early in processElcOutgoing
+            when(requestService.saveRequest(any())).thenThrow(new RuntimeException("Database down"));
+            
+            when(errorCodeSetupService.findByErrorCode(TchErrorCode.ERR_MAPPING_REQUEST.getCode())).thenReturn(mockErrorCodeSetup);
+
+            assertThrows(TchBusinessException.class, 
+                () -> dpProcessingService.createSwiftletFlowsFromXml(mockFile));
+                
+            // Verifies handleGenericError was called
+            verify(errorLogHandler).logError(any(), any(), isNull(), eq(DpProcessingServiceImpl.class));
+            verify(errorMessageService).registerOutgoingError(any(), any(), any(), eq("Database down"), isNull());
+        }
+    }
+
+    // ========================================================================
+    // Tests for: processReceivedSwiftMsgTypeList & buildSwiftNetFlow (MT Fallback)
+    // ========================================================================
+
+    @Test
+    void testCreateSwiftletFlowsFromXml_MTFallback_And_BuildSwiftNetFlow() throws Exception {
+        when(mockFile.isEmpty()).thenReturn(false);
+        when(mockFile.getBytes()).thenReturn(new byte[]{1, 2, 3});
+
+        ElTnxRecord dummyRecord = new ElTnxRecord();
+        RoutingSetup mockRouting = new RoutingSetup();
+        mockRouting.setId(1L);
+        mockRouting.setBankBic("TESTBANK");
+        mockRouting.setCustomerBic("CUSTBIC");
+
+        DpSwiftMsgType mockMsgType = new DpSwiftMsgType();
+        mockMsgType.setType(MessageType.MT_700);
+
+        MtMessage mockMtMessage = new MtMessage();
+        mockMtMessage.setType(MessageType.MT_700);
+        mockMtMessage.setContent("{1:F01BANKBEBBAXXX0000000000}{2:I999BANKDEFFAXXXN}{4:\n:20:REF123\n-}");
+
+        MxMessageDto mockMxDto = new MxMessageDto();
+
+        try (MockedStatic<ZipUtils> zipUtilsMock = mockStatic(ZipUtils.class);
+             MockedStatic<XmlUtils> xmlUtilsMock = mockStatic(XmlUtils.class);
+             MockedStatic<DigestUtils> digestUtilsMock = mockStatic(DigestUtils.class);
+             MockedStatic<SwiftMtExtensionUtils> extensionUtilsMock = mockStatic(SwiftMtExtensionUtils.class);
+             MockedStatic<SwiftMT.toMXConversionUtils> mxConversionMock = mockStatic(SwiftMT.toMXConversionUtils.class);
+             MockedStatic<SwiftMessageParserUtils> parserUtilsMock = mockStatic(SwiftMessageParserUtils.class)) {
+
+            // 1. Setup extraction and parsing
+            when(mockXmlFile.getOriginalFilename()).thenReturn("data.xml");
+            zipUtilsMock.when(() -> ZipUtils.extractZipFiles(mockFile)).thenReturn(List.of(mockXmlFile));
+            xmlUtilsMock.when(() -> XmlUtils.unmarshalWithoutIntrospector(any(), eq(ElTnxRecord.class))).thenReturn(dummyRecord);
+            xmlUtilsMock.when(() -> XmlUtils.marshall(any(), eq(ElTnxRecord.class))).thenReturn("<xml></xml>");
+            digestUtilsMock.when(() -> DigestUtils.sha256Hex(anyString())).thenReturn("CHECKSUM");
+
+            // 2. Setup Routing
+            when(routingSetupService.findRoutingSetupByCriteria(any())).thenReturn(mockRouting);
+            when(routingSetupService.getTestBic(any())).thenReturn("TESTBIC");
+            when(swiftMsgTypeService.findSwiftMsgTypeByCriteria(any(), eq(FlowDirection.B2C))).thenReturn(List.of(mockMsgType));
+            
+            // 3. Force Empty MX List to trigger MT Logic
+            when(swiftService.convertToMxMessageList(any(), any(), any(), any(), any(), anyBoolean()))
+                .thenReturn(Collections.emptyList()); // Empty list forces processReceivedSwiftMsgTypeList fallback
+            
+            when(swiftService.convertToMtMessageList(anyList(), any())).thenReturn(List.of(mockMtMessage));
+            
+            // 4. Mock Extension Utils (Triggering Detail Message Present Branch)
+            extensionUtilsMock.when(() -> SwiftMtExtensionUtils.getMTDetailMessage(anyList(), anySet()))
+                .thenReturn(java.util.Optional.of(mockMtMessage));
+            extensionUtilsMock.when(() -> SwiftMtExtensionUtils.rewriteMtMessages(anyList()))
+                .thenReturn(List.of(mockMtMessage));
+
+            // 5. Mock MT to MX Conversion mapping
+            mxConversionMock.when(() -> SwiftMT.toMXConversionUtils.mtToMxConversion(anyString(), any()))
+                .thenReturn(mockMxDto);
+            when(swiftService.getMessageString(any())).thenReturn("<mx>parsed</mx>");
+            when(swiftService.checkSwiftMxValidation(any(), any())).thenReturn(Collections.emptyList()); // No errors
+
+            // 6. Mocking SwiftMessageParserUtils specifically for buildSwiftNetFlow branches
+            parserUtilsMock.when(() -> SwiftMessageParserUtils.getMur(anyString())).thenReturn("MUR123");
+            parserUtilsMock.when(() -> SwiftMessageParserUtils.getTagValue(anyString(), eq(MessageFieldConst.TAG_12))).thenReturn("");
+            parserUtilsMock.when(() -> SwiftMessageParserUtils.getSwiftMessageVersion(anyString())).thenReturn("V1");
+            // Force sequence to be empty to trigger default "1/1"
+            parserUtilsMock.when(() -> SwiftMessageParserUtils.getTagValue(anyString(), eq(MessageFieldConst.TAG_27A))).thenReturn("");
+            parserUtilsMock.when(() -> SwiftMessageParserUtils.getTagValue(anyString(), eq(MessageFieldConst.TAG_27))).thenReturn("");
+            // Force bank reference number to hit substring branch
+            parserUtilsMock.when(() -> SwiftMessageParserUtils.getTagValue(anyString(), eq(MessageFieldConst.SWIFT_TAG21P))).thenReturn("XX12345");
+            parserUtilsMock.when(() -> SwiftMessageParserUtils.isIndexMsg(anyString())).thenReturn(true);
+            parserUtilsMock.when(() -> SwiftMessageParserUtils.isDetailMsg(anyString())).thenReturn(false);
+            parserUtilsMock.when(() -> SwiftMessageParserUtils.isExtensionMsg(anyString())).thenReturn(false);
+            parserUtilsMock.when(() -> SwiftMessageParserUtils.getSwiftHeader(anyString())).thenReturn("HEADER");
+            parserUtilsMock.when(() -> SwiftMessageParserUtils.getTagValue(anyString(), eq(MessageFieldConst.TAG_20))).thenReturn("TRN123");
+
+            // Execute
+            boolean result = dpProcessingService.createSwiftletFlowsFromXml(mockFile);
+
+            // Assertions
+            assertTrue(result);
+            verify(swiftNetService).saveAllSwiftNetFlow(anyList());
+            
+            // Verify buildSwiftNetFlow correctly populated the DTO via ArgumentCaptor or relying on saveAllSwiftNetFlow
+            // Because sequence was empty, it should have fallen back to MessageFieldConst.ONE_SLASH_ONE (1/1)
+            parserUtilsMock.verify(() -> SwiftMessageParserUtils.getTagValue(anyString(), eq(MessageFieldConst.TAG_27A)), atLeastOnce());
+        }
+    }
+
+    @Test
+    void testCreateSwiftletFlowsFromXml_MTFallback_ValidationFails_ThrowsException() throws Exception {
+        // Setup identical to above but swiftService.checkSwiftMxValidation returns errors
+        when(mockFile.isEmpty()).thenReturn(false);
+        when(mockFile.getBytes()).thenReturn(new byte[]{1, 2, 3});
+
+        ElTnxRecord dummyRecord = new ElTnxRecord();
+        RoutingSetup mockRouting = new RoutingSetup();
+        mockRouting.setId(1L);
+
+        DpSwiftMsgType mockMsgType = new DpSwiftMsgType();
+        mockMsgType.setType(MessageType.MT_700);
+
+        MtMessage mockMtMessage = new MtMessage();
+        mockMtMessage.setType(MessageType.MT_700);
+
+        try (MockedStatic<ZipUtils> zipUtilsMock = mockStatic(ZipUtils.class);
+             MockedStatic<XmlUtils> xmlUtilsMock = mockStatic(XmlUtils.class);
+             MockedStatic<SwiftMtExtensionUtils> extensionUtilsMock = mockStatic(SwiftMtExtensionUtils.class);
+             MockedStatic<SwiftMessageParserUtils> parserUtilsMock = mockStatic(SwiftMessageParserUtils.class)) {
+
+            when(mockXmlFile.getOriginalFilename()).thenReturn("data.xml");
+            zipUtilsMock.when(() -> ZipUtils.extractZipFiles(mockFile)).thenReturn(List.of(mockXmlFile));
+            xmlUtilsMock.when(() -> XmlUtils.unmarshalWithoutIntrospector(any(), eq(ElTnxRecord.class))).thenReturn(dummyRecord);
+            xmlUtilsMock.when(() -> XmlUtils.marshall(any(), eq(ElTnxRecord.class))).thenReturn("<xml></xml>");
+            
+            when(routingSetupService.findRoutingSetupByCriteria(any())).thenReturn(mockRouting);
+            when(swiftMsgTypeService.findSwiftMsgTypeByCriteria(any(), eq(FlowDirection.B2C))).thenReturn(List.of(mockMsgType));
+            when(swiftService.convertToMxMessageList(any(), any(), any(), any(), any(), anyBoolean())).thenReturn(Collections.emptyList());
+            when(swiftService.convertToMtMessageList(anyList(), any())).thenReturn(List.of(mockMtMessage));
+            
+            extensionUtilsMock.when(() -> SwiftMtExtensionUtils.getMTDetailMessage(anyList(), anySet()))
+                .thenReturn(java.util.Optional.of(mockMtMessage));
+            extensionUtilsMock.when(() -> SwiftMtExtensionUtils.rewriteMtMessages(anyList()))
+                .thenReturn(List.of(mockMtMessage));
+
+            // Force validation error triggering the BadRequestException
+            when(swiftService.checkSwiftMxValidation(any(), any())).thenReturn(List.of("Missing Tag 20"));
+            when(errorCodeSetupService.findByErrorCode(TchErrorCode.ERR_MAPPING_REQUEST.getCode())).thenReturn(mockErrorCodeSetup);
+
+            BadRequestException ex = assertThrows(BadRequestException.class, 
+                () -> dpProcessingService.createSwiftletFlowsFromXml(mockFile));
+                
+            assertEquals("Missing Tag 20", ex.getMessage());
+        }
+    }
+    
+
