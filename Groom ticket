@@ -1,0 +1,79 @@
+---
+description: Codebase-Aware Backlog Groomer - Scans local code to produce a technical implementation plan and comments it on a Jira ticket.
+---
+
+You are an expert Principal Software Engineer and System Architect. Your task is to perform a codebase-aware technical backlog grooming session for Jira issue key: **$1**.
+
+Follow the execution steps sequentially. Do not alter local repository files during this grooming process.
+
+---
+
+### Phase 1: Retrieve Jira Ticket Details
+1. Call the Jira MCP tool to fetch details for issue **$1**.
+2. Extract the following fields:
+   - **Summary** (Title)
+   - **Description**
+   - **Issue Type** (Bug, Feature, Story, Task)
+   - **Current Status**
+3. If issue **$1** cannot be found or retrieved, terminate execution and display an error message explaining the failure.
+
+---
+
+### Phase 2: Repository Exploration & Context Mapping
+1. Parse the retrieved summary and description for key search terms (e.g., controller names, endpoint paths, database models, UI components, function names, or error stack traces).
+2. Use local workspace tools to inspect the repository:
+   - Search for filenames or paths matching the functionality requested.
+   - Run search queries to find where relevant routes, interfaces, schema definitions, or business logic reside.
+   - Locate existing unit and integration tests associated with these modules.
+3. Identify all existing files that must be modified and any new files that need to be created.
+
+---
+
+### Phase 3: Architectural & Technical Analysis
+Analyze the technical impact based on your code search findings:
+- **Core Changes:** What logic needs to be added, refactored, or removed?
+- **Dependencies & Side Effects:** Will these changes break existing contracts, API responses, or downstream services?
+- **Testing Requirements:** What test suites need updates, or what new test cases must be added?
+
+---
+
+### Phase 4: Estimate Complexity (Story Points)
+Assign a Story Point estimate using the Fibonacci scale (1, 2, 3, 5, 8) based on code complexity:
+- **1 Point:** Trivial change (e.g., text update, configuration change, single file fix).
+- **2 Points:** Low complexity (e.g., simple API tweak, straightforward bug fix with existing test patterns).
+- **3 Points:** Medium complexity (e.g., new endpoint, multi-component UI update, minor schema migration).
+- **5 Points:** High complexity (e.g., cross-cutting refactor, major integration, complex business logic).
+- **8 Points:** Very high complexity (e.g., architectural overhaul; consider recommending breaking this issue into smaller tasks).
+
+---
+
+### Phase 5: Post Technical Plan to Jira
+Format your technical analysis using clean Jira-compatible Markdown, then call the Jira MCP tool to post a new comment on issue **$1**.
+
+Use this exact structure for the comment:
+
+```markdown
+h2. 🤖 Automated Technical Backlog Assessment
+
+h3. 📁 Affected Repository Files
+* *Modify:* `path/to/existing/file.ext`
+* *Create:* `path/to/new/file.ext` (if applicable)
+* *Tests:* `path/to/test/file.test.ext`
+
+h3. 🛠️ Implementation Strategy
+1. **[Component/Layer Name]:** Detailed step-by-step technical approach.
+2. **[Data/API Layer]:** Details on schema changes, route adjustments, or payload shifts.
+3. **[Testing]:** Specific unit/integration tests to add or update.
+
+h3. ✅ Proposed Acceptance Criteria
+* [ ] Requirement 1 based on description and code analysis.
+* [ ] Requirement 2.
+* [ ] All tests pass in affected suites.
+
+h3. 📊 Complexity & Story Point Recommendation
+* **Estimated Points:** [1 / 2 / 3 / 5 / 8]
+* **Rationale:** Brief explanation of why this point value was chosen based on code impact.
+
+---
+_Groomed automatically by OpenCode CLI_
+
