@@ -1,0 +1,67 @@
+The most impactful GenAI solution I built is VoiceBridge: AI-Powered Speech-to-Speech Translation for Accessible Education.
+
+VoiceBridge started as a Google Solutions Channel problem statement in 2024. The challenge was to make educational content accessible to learners who may not understand the language in which it was originally created. I found the problem especially meaningful because a student should not miss out on quality education simply because of a language barrier.
+
+The idea behind VoiceBridge is similar to the concept now used by YouTube through its “auto-dubbed” feature, where video speech is translated and converted into additional language tracks for viewers around the world. YouTube describes automatic dubbing as a process that generates translated audio tracks to make videos more accessible globally.
+
+Business problem and use case
+Educational videos are usually created in one language, while the potential audience may speak many others. Professional dubbing is expensive, time-consuming, and difficult to scale for individual educators, online instructors, and smaller organisations.
+
+VoiceBridge addresses this problem by transforming a source video into a translated speech version through an automated workflow. This allows educators to reuse one recording for multiple language audiences without recording every lesson again.
+
+My role and responsibilities
+I designed and developed the solution end to end. My responsibilities included:
+
+Designing the overall speech-to-speech transformation workflow.
+
+Building the application and user interface.
+
+Integrating speech recognition, translation, and text-to-speech capabilities.
+
+Processing and synchronising audio and video.
+
+Handling multilingual input and output.
+
+Managing errors and intermediate processing steps.
+
+Packaging the application with Docker for consistent deployment.
+
+The project is available in my GitHub repository as an implementation of an AI-powered video transformation pipeline.
+
+Technologies and tools used
+VoiceBridge uses:
+
+Python for application logic and workflow orchestration.
+
+Flask-style application architecture for serving the solution.
+
+HTML templates for the web interface.
+
+Whisper-style multilingual speech recognition for converting spoken content into text.
+
+Translation models and APIs for converting the transcript into the target language.
+
+Text-to-speech technology for generating the translated audio.
+
+FFmpeg for extracting audio, processing media, and recombining the translated audio with the original video.
+
+Docker for containerisation and reproducible deployment.
+
+Python packages managed through requirements.txt.
+
+Agentic capabilities
+VoiceBridge is not limited to a single AI prompt. It works as a multi-step AI workflow.
+
+The system accepts a video, extracts its audio, transcribes the spoken content, translates the transcript into the selected language, generates translated speech, and synchronises the new audio with the original video. It coordinates AI models, media-processing tools, and application logic to complete the transformation with minimal manual intervention.
+
+This demonstrates agentic behaviour through planning and execution across multiple stages. The application determines the sequence of operations, passes outputs from one stage to the next, interacts with tools such as FFmpeg, and produces a final transformed video.
+
+Challenges and lessons learned
+The biggest challenges were maintaining audio-video synchronisation, preserving the meaning and teaching tone of the original speaker, handling different languages and speech patterns, and making the workflow reliable for different video files.
+
+The most important lesson I learned is that successful AI products depend on more than the model. The orchestration layer, error handling, media processing, validation, and user experience are equally important. A good AI solution must connect all these components into a workflow that users can trust.
+
+Impact and outcome
+The measurable outcome was a working, deployable end-to-end prototype that converts one educational video into a multilingual version through a single automated workflow. It reduces the manual effort involved in dubbing, helps educators reach new language audiences, and provides a practical approach to making learning content more inclusive.
+
+What makes VoiceBridge impactful to me is that it applies GenAI to a problem with a clear human outcome. It uses technology to help more learners access the same educational knowledge, regardless of the language in which it was originally delivered.
