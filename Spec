@@ -1,0 +1,19 @@
+/opsx-propose send-to-cft-boolean-refactor
+
+Requirement:
+Use Requirement-sendToCft-type-change.md as the requirement source:
+- AC 1: Generated API interfaces use boolean sendToCft parameter.
+- AC 2: Type Safety: No string-based comparisons for sendToCft exist in the Service layer.
+- AC 3: Builds successfully with no type mismatch errors.
+- AC 4: Test Coverage: All unit tests pass using boolean primitives.
+
+Source of Truth:
+- Rely strictly on the existing OpenSpec directory (openspec/ or spec/) as the sole specification and domain context.
+- Do NOT read, update, or reference any files in the /docs folder.
+
+Instructions:
+1. Parse the requirement and determine impacts across all system capabilities in the main spec.
+2. Generate all change artifacts: proposal.md, delta specs in specs/**/*.md, design.md, and tasks.md.
+3. In tasks.md, list only code modifications, unit/integration test updates, and spec updates.
+4. Auto-advance through proposal, specs, design, and task creation.
+
