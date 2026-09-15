@@ -1,0 +1,35 @@
+project/
+│
+├── AI-INSTRUCTIONS.md
+│
+├── brain/
+│   ├── README.md          ← explains brain files
+│   ├── memory.md
+│   ├── decisions.md
+│   ├── domain.md
+│   ├── business-rules.md
+│   ├── current-behavior.md
+│   └── dependencies.md
+│
+├── docs/
+│   ├── README.md          ← explains docs files
+│   ├── overview.md
+│   ├── architecture.md
+│   ├── infrastructure.md
+│   ├── api.md
+│   └── security.md
+│
+├── requirements/
+│   ├── README.md          ← explains requirements
+│   └── requirements.md
+│
+├── openspec/
+│   ├── specs/
+│   └── changes/
+│
+└── test-audit/
+    ├── README.md          ← explains validation files
+    ├── test-strategy.md
+    ├── validation.md
+    ├── audit-checklist.md
+    └── known-issues.md
