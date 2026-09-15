@@ -1,0 +1,29 @@
+# Brain Folder
+
+This folder contains long-term knowledge about the project.
+
+## memory.md
+Important project context that the AI should remember across tasks.
+
+## decisions.md
+Important technical or architectural decisions and WHY they were made.
+
+## domain.md
+Important business/domain concepts and their meanings.
+
+## business-rules.md
+Rules that the application must always follow.
+
+## current-behavior.md
+What the existing application actually does today.
+This must be based on code and tests, not assumptions.
+
+## dependencies.md
+Important external systems, libraries, services and integrations.
+
+## Rules
+
+- Do not invent information.
+- Update only the relevant file.
+- Do not duplicate information unnecessarily.
+- If code contradicts these files, report the contradiction.
