@@ -1,0 +1,30 @@
+# Documentation Folder
+
+This folder explains how the system is technically built.
+
+## overview.md
+What the project does and its major components.
+
+## architecture.md
+System architecture and how components communicate.
+
+## infrastructure.md
+Servers, cloud resources, environments and infrastructure.
+
+## api.md
+API endpoints, requests, responses and API behavior.
+
+## database.md
+Database structure, tables, relationships and important queries.
+
+## security.md
+Authentication, authorization and security design.
+
+## deployment.md
+How the application is built, deployed and released.
+
+## Rules
+
+- Documentation describes the system.
+- Do not use this folder for new requirements.
+- Keep documentation consistent with implemented code.
