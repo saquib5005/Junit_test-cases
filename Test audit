@@ -1,0 +1,18 @@
+# Test and Audit Folder
+
+This folder defines how we verify that changes are correct.
+
+## test-strategy.md
+What types of tests are required.
+
+## validation.md
+Acceptance criteria and validation rules.
+
+## audit-checklist.md
+Things that must be checked before completing a change.
+
+## known-issues.md
+Known bugs, limitations and technical debt.
+
+Tests themselves remain in the project's actual test directories.
+These Markdown files describe the validation approach.
