@@ -1,0 +1,41 @@
+# AI Project Instructions
+
+## Before making changes
+1. Read relevant files from:
+   - brain/
+   - docs/
+   - requirements/
+   - openspec/
+2. Inspect the existing code and tests.
+3. Never assume documentation is correct if the code contradicts it.
+4. Identify conflicts and report them.
+
+## When implementing a requirement
+1. Understand the Jira requirement.
+2. Identify affected code, APIs, database, tests and documentation.
+3. Create/update the OpenSpec change.
+4. Implement the code according to the approved OpenSpec.
+5. Run relevant tests.
+
+## After implementation
+Check whether the change affects any project knowledge.
+
+Update ONLY the relevant files:
+- brain/memory.md
+- brain/decisions.md
+- brain/domain.md
+- brain/business-rules.md
+- brain/current-behavior.md
+- brain/dependencies.md
+- docs/*.md
+- test-audit/validation.md
+- test-audit/known-issues.md
+
+Do not modify unrelated documentation.
+
+## Important
+- Do not invent information.
+- Do not silently resolve conflicts.
+- If code, docs, requirements and OpenSpec disagree, report the conflict.
+- Keep documentation synchronized with the final implemented behavior.
+- If no documentation or knowledge changed, do not modify any .md file.
