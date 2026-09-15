@@ -1,0 +1,27 @@
+schema: spec-driven
+
+context: |
+  Before creating OpenSpec artifacts, understand the existing project.
+
+  Read:
+  - AI-INSTRUCTIONS.md
+  - brain/README.md
+  - docs/README.md
+  - requirements/README.md
+  - test-audit/README.md
+
+  When relevant, also read:
+  - brain/*.md
+  - docs/*.md
+  - requirements/*.md
+  - test-audit/*.md
+
+  Always inspect the actual source code and relevant tests.
+
+  Rules:
+  - Existing code represents current behavior.
+  - Requirements represent desired behavior.
+  - Do not invent behavior.
+  - If documentation conflicts with code, identify the conflict.
+  - Create specs based on the requirement and actual affected code.
+  - Do not modify unrelated specs.
