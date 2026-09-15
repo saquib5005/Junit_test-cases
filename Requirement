@@ -1,0 +1,9 @@
+# Requirements Folder
+
+This folder contains what the business/user wants the system to do.
+
+requirements.md = current requirements and requested changes.
+
+Requirements describe DESIRED behavior, not necessarily current behavior.
+
+Do not treat requirements as proof that the code already behaves this way.
