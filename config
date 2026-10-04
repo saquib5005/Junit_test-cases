@@ -1,0 +1,13 @@
+# Documentation Usage Rules
+
+  - Read relevant documentation before proposing architectural changes.
+  - Use only pages accessible to the current user or authorized tools.
+  - Do not assume that a URL has been read merely because it is listed here.
+  - Verify that retrieved documentation is current and relevant.
+  - Prefer the applicable, current project specification when
+    documenting expected system behavior.
+  - If documentation conflicts with existing code or an approved
+    decision, report the conflict rather than silently choosing.
+  - Do not copy entire pages into change specifications.
+  - Summarize only the requirements and decisions relevant to the change.
+  - Record material assumptions and unresolved documentation gaps.
