@@ -1,0 +1,7 @@
+rules:
+  proposal:
+    - Execute ai_technical/JiraGrooming/groom-ticket.md on the given Jira key before writing proposal.md.
+    - Post the technical-domain comment through the Jira tool.
+    - Re-fetch the issue after the post. Read the full description and every comment returned by that fetch.
+    - In proposal.md, record the Jira key and the returned comment id.
+    - If there is no Jira tool, or the re-fetch has no new comment id, stop and do not write proposal.md.
