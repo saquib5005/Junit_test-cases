@@ -1,0 +1,16 @@
+# openspec/config.yaml
+context: |
+  Implementation is not done until ai_technical/CodeReview/code-review.md has been executed on the change diff.
+
+rules:
+  tasks:
+    - Do not add a task that says "run code review". Review happens in apply, not in the plan.
+
+operations:
+  apply:
+    - After the tasks for this session are implemented, read ai_technical/CodeReview/code-review.md and execute it on the diff.
+    - Review against proposal.md, specs, and design.md. Fix findings in code before marking those tasks done.
+    - Record blocking findings in the change folder. Do not mark tasks complete while a blocker is open.
+  archive:
+    - Re-read ai_technical/CodeReview/code-review.md and run it on the full change diff.
+    - If a blocking finding has no fix, stop. Do not archive.
